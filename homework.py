@@ -26,41 +26,30 @@ HOMEWORK_VERDICTS = {
     "rejected": "Работа проверена: у ревьюера есть замечания.",
 }
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    filename="main.log",
-    format="%(asctime)s, %(levelname)s, %(message)s, %(name)s",
-)
 
-
-def check_tokens():
+def check_tokens() -> bool:
     """Проверка доступности переменных окружения."""
-    if (
-        PRACTICUM_TOKEN is None
-        or TELEGRAM_TOKEN is None
-        or TELEGRAM_CHAT_ID is None
-    ):
-        logging.critical("Переменная окружения не определена!")
-        raise NameError("Переменная окружения не определена!")
+    return all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID))
 
 
-def send_message(bot, message):
+def send_message(bot: telegram.Bot, message: str) -> None:
     """Отправление сообщения в telegram."""
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug("Сообщение успешно отправлено")
-    except Exception as error:
-        logging.error(error)
+    except telegram.TelegramError:
+        logging.error("Сбой в работе программы")
 
 
-def get_api_answer(timestamp):
+def get_api_answer(timestamp: int) -> dict:
     """Запрос к эндпоинту API-сервиса."""
-    timestamp2 = timestamp or int(time.time())
-    payload = {"from_date": timestamp2}
+    timestamp = timestamp or int(time.time())
+    payload = {"from_date": timestamp}
     try:
+        logging.info(f"Запрос к API, эндпоинт {ENDPOINT}, параметр {HEADERS}")
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
-    except RequestException as error:
-        logging.error(error)
+    except RequestException:
+        logging.error("Ошибка при запросе к эндпоинту")
 
     if response.status_code != HTTPStatus.OK:
         raise RequestException(response)
@@ -68,7 +57,7 @@ def get_api_answer(timestamp):
     return response.json()
 
 
-def check_response(response):
+def check_response(response: dict) -> list:
     """Проверка ответа API на соответствие документации."""
     if not isinstance(response, dict):
         logging.error("Имеет некорректный тип.")
@@ -85,13 +74,12 @@ def check_response(response):
     return response["homeworks"]
 
 
-def parse_status(homework):
+def parse_status(homework) -> str:
     """Извлечение информации о статусе работы."""
     if not homework.get("homework_name"):
         logging.error("Отсутствует имя домашней работы.")
         raise KeyError("Отсутствует ключ.")
-    else:
-        homework_name = homework.get("homework_name")
+    homework_name = homework.get("homework_name")
 
     if "status" not in homework:
         logging.error("Отсутствует ключ.")
@@ -109,7 +97,10 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    check_tokens()
+    if not check_tokens():
+        logging.critical("Переменная окружения не определена!")
+        raise NameError("Переменная окружения не определена!")
+
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     last_status = ""
@@ -119,23 +110,28 @@ def main():
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
 
-            if len(homeworks) == 0:
-                logging.debug("Ответ API пуст: нет домашних работ.")
-                break
-            for homework in homeworks:
-                message = parse_status(homework)
+            if homeworks:
+                message = parse_status(homeworks[0])
                 if message != last_status:
                     send_message(bot, message)
                     last_status = message
+            else:
+                logging.debug("Ответ API пуст: нет домашних работ.")
+                break
 
         except Exception as error:
             message = f"Сбой в работе программы: {error}"
+            logging.error(message)
             send_message(bot, message)
-            exit()
 
         finally:
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.DEBUG,
+        filename="main.log",
+        format="%(asctime)s, %(levelname)s, %(message)s, %(name)s",
+    )
     main()
