@@ -1,12 +1,14 @@
 import logging
 import os
+import sys
 import time
 from http import HTTPStatus
 
 import requests
 import telegram
 from dotenv import load_dotenv
-from requests import RequestException
+
+from exception import ResponcePracticumError
 
 load_dotenv()
 
@@ -36,23 +38,26 @@ def send_message(bot: telegram.Bot, message: str) -> None:
     """Отправление сообщения в telegram."""
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
-        logging.debug("Сообщение успешно отправлено")
-    except telegram.TelegramError:
-        logging.error("Сбой в работе программы")
+        logging.debug("Сообщение отправлено")
+    except telegram.TelegramError as error:
+        logging.error(f"Сбой в работе программы: {error}")
+    else:
+        logging.debug("Сообщение отправлено. Ошибка на стороне telegram")
 
 
 def get_api_answer(timestamp: int) -> dict:
     """Запрос к эндпоинту API-сервиса."""
     timestamp = timestamp or int(time.time())
     payload = {"from_date": timestamp}
+
     try:
         logging.info(f"Запрос к API, эндпоинт {ENDPOINT}, параметр {HEADERS}")
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
-    except RequestException:
-        logging.error("Ошибка при запросе к эндпоинту")
+    except requests.RequestException as error:
+        raise ResponcePracticumError(error)
 
     if response.status_code != HTTPStatus.OK:
-        raise RequestException(response)
+        raise requests.RequestException(response)
 
     return response.json()
 
@@ -99,7 +104,7 @@ def main():
     """Основная логика работы бота."""
     if not check_tokens():
         logging.critical("Переменная окружения не определена!")
-        raise NameError("Переменная окружения не определена!")
+        sys.exit("Переменная окружения не определена!")
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
@@ -108,6 +113,7 @@ def main():
     while True:
         try:
             response = get_api_answer(timestamp)
+            timestamp = response.get("current_date")
             homeworks = check_response(response)
 
             if homeworks:
@@ -117,7 +123,7 @@ def main():
                     last_status = message
             else:
                 logging.debug("Ответ API пуст: нет домашних работ.")
-                break
+                send_message(bot, "Нет домашних работ")
 
         except Exception as error:
             message = f"Сбой в работе программы: {error}"
