@@ -8,7 +8,7 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
-from exception import ResponcePracticumError
+from exception import MyCustomError, ResponcePracticumError
 
 load_dotenv()
 
@@ -39,8 +39,10 @@ def send_message(bot: telegram.Bot, message: str) -> None:
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug("Сообщение отправлено")
-    except telegram.TelegramError as error:
-        logging.error(f"Сбой в работе программы: {error}")
+    except telegram.TelegramError:
+        error_message = f'Ошибка при отправке сообщения "{message}".'
+        logging.exception(error_message)
+        raise MyCustomError(error_message)
     else:
         logging.debug("Сообщение отправлено. Ошибка на стороне telegram")
 
@@ -65,15 +67,12 @@ def get_api_answer(timestamp: int) -> dict:
 def check_response(response: dict) -> list:
     """Проверка ответа API на соответствие документации."""
     if not isinstance(response, dict):
-        logging.error("Имеет некорректный тип.")
         raise TypeError("Имеет некорректный тип.")
 
     if "homeworks" not in response:
-        logging.error("Отсутствует ожидаемый ключ в ответе.")
         raise KeyError("Отсутствует ожидаемый ключ в ответе.")
 
     if not isinstance(response.get("homeworks"), list):
-        logging.error("Имеет некорректный тип.")
         raise TypeError("Имеет некорректный тип.")
 
     return response["homeworks"]
@@ -82,19 +81,16 @@ def check_response(response: dict) -> list:
 def parse_status(homework) -> str:
     """Извлечение информации о статусе работы."""
     if not homework.get("homework_name"):
-        logging.error("Отсутствует имя домашней работы.")
         raise KeyError("Отсутствует ключ.")
     homework_name = homework.get("homework_name")
 
     if "status" not in homework:
-        logging.error("Отсутствует ключ.")
         raise KeyError("Отсутствует ключ.")
 
     homework_status = homework.get("status")
     verdict = HOMEWORK_VERDICTS.get(homework_status)
 
     if homework_status not in HOMEWORK_VERDICTS:
-        logging.error("Отсутствует ключ.")
         raise KeyError("Отсутствует ключ.")
 
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
